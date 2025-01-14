@@ -49,12 +49,14 @@ uint32_t kernel_id = 0;
 
 /* total instruction counter, maintained in system memory, incremented by
  * "counter" every time a kernel completes  */
+uint64_t total_instr = 0;
 uint64_t total_cg = 0;
 uint64_t total_indirect = 0;
 uint64_t total_shfl = 0;
 uint64_t total_ballot = 0;
 
 /* kernel instruction counter, updated by the GPU */
+__managed__ uint64_t instr_counter = 0;
 __managed__ uint64_t shfl_counter = 0;
 __managed__ uint64_t ballot_counter = 0;
 __managed__ uint64_t indirect_counter = 0;
@@ -218,6 +220,21 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func) {
                     nvbit_add_call_arg_const_val64(i, (uint64_t)&ballot_counter);
                 }
 
+                /* Insert a call to "count_instrs" before the instruction "i" */
+                nvbit_insert_call(i, "count_instrs", IPOINT_BEFORE);
+                if (exclude_pred_off) {
+                    /* pass predicate value */
+                    nvbit_add_call_arg_guard_pred_val(i);
+                } else {
+                    /* pass always true */
+                    nvbit_add_call_arg_const_val32(i, 1);
+                }
+
+                /* add count warps option */
+                nvbit_add_call_arg_const_val32(i, count_warp_level);
+                /* add pointer to counter location */
+                nvbit_add_call_arg_const_val64(i, (uint64_t)&instr_counter);
+
             }
         }
     }
@@ -275,6 +292,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
                 nvbit_enable_instrumented(ctx, func, false);
             }
 
+            instr_counter = 0;
             indirect_counter = 0;
             shfl_counter = 0;
             ballot_counter = 0;
@@ -286,6 +304,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
              * 3. Print the thread instruction counters
              * 4. Release the lock*/
             CUDA_SAFECALL(cudaDeviceSynchronize());
+            total_instr += instr_counter;
             total_indirect += indirect_counter;
             total_shfl += shfl_counter;
             total_ballot += ballot_counter;
@@ -328,6 +347,10 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
 void nvbit_at_term() {
     printf("Total indirect function calls: %ld\n", total_indirect);
     printf("Total cooperative group kernel launches: %ld\n", total_cg);
+    if (count_warp_level == 1)
+        printf("Total instructions (warp level): %ld\n", total_instr);
+    else
+        printf("Total instructions (thread level): %ld\n", total_instr);
     printf("Total __shfl_sync() calls: %ld\n", total_shfl);
     printf("Total __ballot_sync() calls: %ld\n", total_ballot);
 }
