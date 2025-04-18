@@ -10,6 +10,8 @@
 /tools/mov_replace
 /tools/opcode_hist
 /tools/record_reg_vals
+/tools/benchmark_profile
+/tools/photon
 /tools/main/compress
 /test-apps/vectoradd/vectoradd
 /test-apps/vectormultadd/vectormultadd
